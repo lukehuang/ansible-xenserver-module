@@ -1,0 +1,25 @@
+## Travis CI configuration for the ansible-xen-module library.
+##
+##   <https://travis-ci.org/mdklatt/ansible-xen-module>
+##
+language: python
+
+python:
+  - "2.7"
+
+branches:
+  only:
+    - master
+    - dev
+
+sudo: false
+
+install:
+  - pip install -r requirements.txt -r test/requirements.txt
+
+env:
+  - ANSIBLE_LIBRARY=src
+
+script:
+  - cmake --version
+  - pytest --verbose --ansible-host-pattern=localhost test/
