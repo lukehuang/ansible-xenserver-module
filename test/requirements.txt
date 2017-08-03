@@ -1,0 +1,6 @@
+## Python requirements for running tests.
+##
+##   pip install --requirement=requirements.txt
+##
+pytest>=3.0
+pytest-ansible>=1.3
