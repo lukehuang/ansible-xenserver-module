@@ -8,19 +8,17 @@ run with `--ansible-host-pattern=localhost`.
 import pytest
 
 
-@pytest.mark.parametrize("execute", [True, False])
-def test_xen(ansible_module, execute):
-    """ Test the xen module.
+def test_params(ansible_module):
+    """ Test module parameter passing.
     
     """
     params = {
-        "execute": execute,
+        "image": "CentOS 7",
     }
     result = ansible_module.xen(**params)
     host = result["localhost"]
     assert not host.get("failed", False)
-    assert host["changed"] == execute
-    assert host["execute"] == execute
+    assert host["image"] == params["image"]
     return
 
 
