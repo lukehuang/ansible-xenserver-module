@@ -1,4 +1,4 @@
-""" The xen Ansible module.
+""" The xen Ansible module for managing VMs.
 
 See the DOCUMENTATION and EXAMPLES strings below for more information.
 
@@ -10,9 +10,6 @@ from ansible.module_utils.basic import AnsibleModule
 
 
 __all__ = "main",
-
-
-__version__ = "0.1.0.dev1"  # PEP 0440 with Semantic Versioning
 
 
 ANSIBLE_METADATA = {
@@ -41,7 +38,7 @@ options:
 
 
 EXAMPLES = """
-- ec2:
+- zen:
     execute: true
 """  # plain text
 

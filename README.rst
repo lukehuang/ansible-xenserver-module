@@ -10,7 +10,7 @@ xen
 
 |travis.png|
 
-This is an `Ansible`_ module for managing XenServer assets.
+This package contains `Ansible`_ modules for managing XenServer assets.
 
 
 Installation
