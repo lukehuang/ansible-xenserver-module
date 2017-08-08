@@ -27,7 +27,7 @@ description: |
 requirements:
   - XenAPI (1.2+)
 notes:
-  - U(https://github.com/mdklatt/ansible-xen-module)
+  - U(https://github.com/mdklatt/ansible-xenserver-module)
 version_added: "2.2"
 author: Michael Klatt
 options:

@@ -1,6 +1,6 @@
-===
-xen
-===
+=========
+xenserver
+=========
 
 .. |travis.png| image:: https://travis-ci.org/mdklatt/ansible-xen-module.png?branch=master
    :alt: Travis CI build status

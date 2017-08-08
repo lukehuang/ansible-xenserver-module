@@ -1,5 +1,6 @@
-## Python requirements for using the cmake module.
+## Python requirements for using the xenserver modules.
 ##
 ##   pip install --requirement=requirements.txt
 ##
 ansible>=2.2
+XenAPI>=1.2
