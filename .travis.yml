@@ -1,6 +1,6 @@
-## Travis CI configuration for the ansible-xen-module library.
+## Travis CI configuration for the ansible-xenserver-module library.
 ##
-##   <https://travis-ci.org/mdklatt/ansible-xen-module>
+##   <https://travis-ci.org/mdklatt/ansible-xenserver-module>
 ##
 language: python
 

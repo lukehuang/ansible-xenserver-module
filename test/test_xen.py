@@ -30,8 +30,7 @@ def test_params(ansible_module):
         "username": "root",
         "password": "abc123",
         "name": "vm1",
-        "state": "present",
-        "template": "CentOS",
+        "state": "running",
     }
     result = ansible_module.xen(**params)
     traceback = result["localhost"]["exception"].rstrip()

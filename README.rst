@@ -10,7 +10,10 @@ xenserver
 
 |travis.png|
 
-This package contains `Ansible`_ modules for managing XenServer assets.
+This package contains `Ansible`_ modules for managing XenServer assets. Check
+mode is supported.
+
+The `xen` module is currently limited to starting and stopping VMs.
 
 
 Installation
