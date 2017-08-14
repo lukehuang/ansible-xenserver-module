@@ -1,3 +1,10 @@
-# Ignore pytest cache files.
+# Ignore pytest artifacts.
 
 .cache/
+*.retry
+
+
+# These files are used for local testing against a live XenServer installation
+# and should not be distributed.
+
+playbook.yml
