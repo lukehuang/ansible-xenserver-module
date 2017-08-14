@@ -1,8 +1,8 @@
 """ The xen Ansible module for managing VMs.
 
-Check mode is supported. Attempting to shut down a VM while it is booting up
-will fail, so avoid rapid cycling of power states. See the DOCUMENTATION and
-EXAMPLES strings below for more information.
+Check mode is supported. Rapid power cycling, e.g. attempting to shut down a VM
+while it is still booting up, may cause tasks to fail. See the DOCUMENTATION
+and EXAMPLES strings below for more information.
 
 """
 # Ansible modules do not use the normal Python import machinery, so all imports
@@ -113,10 +113,6 @@ _ARGS = {
 def main():
     """ Execute the module.
 
-    WARNING: Rapidly cycling through states in async mode may not have the
-    desired effect because the VM appears to get out of sync with its reported
-    power state.
-
     """
     module = AnsibleModule(
         _ARGS,
@@ -133,8 +129,9 @@ def main():
     else:
         filters["tags"] = module.params["tags"]
     actions = {
-        "running": _start,
-        "halted": _shutdown,
+        "halted": _halted,
+        "present": _present,
+        "running": _running,
     }
     action = actions[module.params["state"]]
     async = module.params["async"]
@@ -195,77 +192,101 @@ def _xeniter(xen, filters):
     return
 
 
-def _start(xen, record, check=False, async=False):
-    """ Ensure that the VM is started.
-
-    Returns True if starting the VM will modify its state. In check mode the
-    VM is not modified.
-
-    The `async` option only applies to operations performed by this action. If
-    the VM operations queue is not empty, this will block until it is. This is
-    done to avoid putting the VM into a contradictory state.
+def _async_wait(action):
+    """ Wait for pending VM operations to complete before executing.
 
     """
-    # TODO: This is almost identical to _shutdown; refactor.
-    objref = record["object_ref"]
-    while record["current_operations"]:
-        # The VM is already in the middle of one or more asynchronous
-        # operations, so wait until its state is finalized to avoid dueling
-        # state changes.
-        sleep(0.5)  # don't DOS the server
-        record = xen.VM.get_record(objref)
-    pause = force = False
-    actions = {"halted": "start", "suspended": "resume"}
-    state = record["power_state"].lower()
-    try:
-        action = actions[state]
-    except KeyError:
-        assert state == "running"
-        return False
-    if not check:
-        # VM needs to be modified to achieve the desired state.
-        #assert action in record["allowed_operations"]
-        api = xen.Async.VM if async else xen.VM
-        getattr(api, action)(objref, pause, force)
-    return True
+    # This allows a single asynchronous action (the typical use case) to return
+    # quickly to the playbook, but prevents a situation where follow-on actions
+    # are out of phase with the pending VM state.
+    #
+    # If full asynchronous behavior is really needed, it might be possible for
+    # each action to predict the pending VM state by inspecting the sequence of
+    # operations in its queue.
+
+    def wrapper(xen, record, *args, **kwargs):
+        """ Wrapper function for calling action. """
+        objref = record["object_ref"]
+        while record["current_operations"]:
+            # TODO: Probably need an `async_timeout` option here.
+            # Wait for the operations queue to empty.
+            record = xen.VM.get_record(objref)  # removes object_ref
+            sleep(0.5)  # don't DOS the server
+        record.update({"object_ref": objref})  # action will need this
+        return action(xen, record, *args, **kwargs)
+
+    return wrapper
 
 
-def _shutdown(xen, record, check=False, async=False):
-    """ Ensure that the VM is shut down.
+@_async_wait
+def _halted(xen, record, check=False, async=False):
+    """ Ensure that the VM is halted.
 
-    Returns True if shutting down the VM will modify its state. In check mode
-    the VM is not actually modified.
-
-    The `async` option only applies to operations performed by this action. If
-    the VM operations queue is not empty, this will block until it is. This is
-    done to avoid putting the VM into a contradictory state.
+    Returns True if this requires modifying the VM state. In check mode the VM
+    is not modified. The `async` option only applies to operations performed
+    within a single action; multiple actions are always synchronous.
 
     """
-    # TODO: This is almost identical to _start; refactor.
-    objref = record["object_ref"]
-    while record["current_operations"]:
-        # The VM is already in the middle of one or more asynchronous
-        # operations, so wait until its state is finalized to avoid dueling
-        # state changes.
-        sleep(0.5)  # don't DOS the server
-        record = xen.VM.get_record(objref)
+    # TODO: This is almost identical to _running; refactor.
     actions = {"running": "clean_shutdown", "suspended": "hard_shutdown"}
     state = record["power_state"].lower()
     try:
-        action = actions[state]
+        rpc = actions[state]
     except KeyError:
         assert state == "halted"
         return False
     if not check:
         # VM needs to be modified to achieve the desired state.
-        if action not in record["allowed_operations"]:
-            # An expected cause of this is requesting clean_shutdown while the
-            # VM is booting up. This has been observed while rapidly cycling
-            # power states during testing, but shouldn't be an issue during
-            # normal operations.
-            raise RuntimeError("VM refuses {:s} at this time".format(action))
+        if rpc not in record["allowed_operations"]:
+            # This can occur while rapidly cycling power states, i.e. a clean
+            # shutdown will be refused while the VM is still booting up. It
+            # shouldn't be an issue during normal operations.
+            raise RuntimeError("VM refuses {:s} at this time".format(rpc))
         api = xen.Async.VM if async else xen.VM
-        getattr(api, action)(record["object_ref"])
+        getattr(api, rpc)(record["object_ref"])
+    return True
+
+
+@_async_wait
+def _present(xen, record, check=False, async=False):
+    """ Ensure that the VM is present.
+
+    Returns True if this requires modifying the VM state. In check mode the VM
+    is not modified. The `async` option only applies to operations performed
+    within a single action; multiple actions are always synchronous.
+
+    """
+    # TODO: Should this ensure that the VM is running or just that it exists?
+    raise NotImplementedError
+
+
+@_async_wait
+def _running(xen, record, check=False, async=False):
+    """ Ensure that the VM is running.
+
+    Returns True if this requires modifying the VM state. In check mode the VM
+    is not modified. The `async` option only applies to operations performed
+    within a single action; multiple actions are always synchronous.
+
+    """
+    # TODO: This is almost identical to _halted; refactor.
+    pause = force = False
+    actions = {"halted": "start", "suspended": "resume"}
+    state = record["power_state"].lower()
+    try:
+        rpc = actions[state]
+    except KeyError:
+        assert state == "running"
+        return False
+    if not check:
+        # VM needs to be modified to achieve the desired state.
+        api = xen.Async.VM if async else xen.VM
+        if rpc not in record["allowed_operations"]:
+            # This can occur while rapidly cycling power states, i.e. a clean
+            # shutdown will be refused while the VM is still booting up. It
+            # shouldn't be an issue during normal operations.
+            raise RuntimeError("VM refuses {:s} at this time".format(rpc))
+        getattr(api, rpc)(record["object_ref"], pause, force)
     return True
 
 
