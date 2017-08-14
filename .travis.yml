@@ -21,5 +21,4 @@ env:
   - ANSIBLE_LIBRARY=src
 
 script:
-  - cmake --version
   - pytest --verbose --ansible-host-pattern=localhost test/
