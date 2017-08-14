@@ -47,6 +47,9 @@ options:
   password:
     description: XenServer root password.
     required: true
+  filters:
+    description: Filter returned records by metadata values.
+    required: false
 """  # must be valid YAML
 
 
@@ -71,6 +74,10 @@ _ARGS_SPEC = {
         "type": "str",
         "required": True
     },
+    "filters": {
+        "type": "dict",
+        "default": {},
+    },
 }
 
 
@@ -79,19 +86,12 @@ def main():
 
     """
     module = AnsibleModule(_ARGS_SPEC, supports_check_mode=False)
-    module.log("connecting to {:s}".format(module.params["host"]))
+    filters = {key: obj if isinstance(obj, list) else [obj]
+               for (key, obj) in module.params["filters"].iteritems()}
     with _connect(module.params) as xen:
-        instances = xen.VM.get_all_records().values()
-    timefmt = "%Y%m%dT%H:%M:%SZ"
-    for instance in instances:
-        for key, obj in instance.iteritems():
-            # TODO: Implement filtering.
-            if obj.__class__.__name__ == "DateTime":
-                # Replace an xmlrpclib.DateTime with a regular datetime.
-                # This is an old-style class, so normal type checking can't be
-                # used.
-                instance[key] = datetime.strptime(obj.value, timefmt)
-    module.exit_json(changed=False, instances=instances)  # calls exit(0)
+        module.log("connected to {:s}".format(module.params["host"]))
+        records = list(_xeniter(xen, filters))
+    module.exit_json(changed=False, instances=records)  # calls exit(0)
 
 
 @contextmanager
@@ -109,6 +109,33 @@ def _connect(params):
         yield session.xenapi
     finally:
         session.xenapi.session.logout()
+    return
+
+
+def _xeniter(xen, filters):
+    """ Iterate over filtered inventory records from the host.
+
+    """
+    timefmt = "%Y%m%dT%H:%M:%SZ"
+    for ref, record in xen.VM.get_all_records().iteritems():
+        record["ref"] = ref
+        for key, obj in record.iteritems():
+            if obj.__class__.__name__ == "DateTime":
+                # Replace an xmlrpclib.DateTime with a regular datetime. This
+                # is an old-style class, so normal type checking can't be used.
+                record[key] = datetime.strptime(obj.value, timefmt)
+        valid = True
+        for key, matches in filters.iteritems():
+            # Apply filters.
+            if key == "tags":
+                # TODO: Handle other fields with multiple values.
+                valid = all(value in record.get(key) for value in matches)
+            else:
+                valid = record.get(key) in matches
+            if not valid:
+                break
+        if valid:
+            yield record
     return
 
 
