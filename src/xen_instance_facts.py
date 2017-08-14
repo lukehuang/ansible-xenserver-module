@@ -1,6 +1,7 @@
 """ The xen_instance_facts Ansible module.
 
-This module will return metadata from a XenServer host. See the DOCUMENTATION
+This module will return metadata from a XenServer host. The host is never
+modified, so normal mode and check mode are equivalent. See the DOCUMENTATION
 and EXAMPLES strings below for more information.
 
 """
@@ -85,7 +86,7 @@ def main():
     """ Execute the module.
 
     """
-    module = AnsibleModule(_ARGS_SPEC, supports_check_mode=False)
+    module = AnsibleModule(_ARGS_SPEC, supports_check_mode=True)
     filters = {key: obj if isinstance(obj, list) else [obj]
                for (key, obj) in module.params["filters"].iteritems()}
     with _connect(module.params) as xen:
@@ -117,8 +118,8 @@ def _xeniter(xen, filters):
 
     """
     timefmt = "%Y%m%dT%H:%M:%SZ"
-    for ref, record in xen.VM.get_all_records().iteritems():
-        record["ref"] = ref
+    for objref, record in xen.VM.get_all_records().iteritems():
+        record.update({"object_ref": objref})
         for key, obj in record.iteritems():
             if obj.__class__.__name__ == "DateTime":
                 # Replace an xmlrpclib.DateTime with a regular datetime. This
