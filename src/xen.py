@@ -143,7 +143,7 @@ def main():
         changed = False
         for record in records:
             try:
-                changed = action(xen, record, check, async) or changed
+                changed = action(xen, record, async, check) or changed
             except RuntimeError as err:
                 module.fail_json(msg=err.message, instance=record)
     module.exit_json(changed=changed, instances=records)  # calls exit(0)
@@ -212,7 +212,7 @@ def _async_wait(action):
             # TODO: Probably need an `async_timeout` option here.
             # Wait for the operations queue to empty.
             record = xen.VM.get_record(objref)  # removes object_ref
-            sleep(0.5)  # don't DOS the server
+            sleep(0.1)
         record.update({"object_ref": objref})  # action will need this
         return action(xen, record, *args, **kwargs)
 
@@ -220,7 +220,7 @@ def _async_wait(action):
 
 
 @_async_wait
-def _halted(xen, record, check=False, async=False):
+def _halted(xen, record, async=False, check=False):
     """ Ensure that the VM is halted.
 
     Returns True if this requires modifying the VM state. In check mode the VM
@@ -228,9 +228,9 @@ def _halted(xen, record, check=False, async=False):
     within a single action; multiple actions are always synchronous.
 
     """
-    # TODO: This is almost identical to _running; refactor.
+    # TODO: All state functions are almost identical; refactor.
     actions = {
-        # RPC to achieve the desired state.
+        # RPC needed to achieve the desired state.
         "halted": None,
         "running": "clean_shutdown",
         "suspended": "hard_shutdown"
@@ -243,19 +243,23 @@ def _halted(xen, record, check=False, async=False):
     if not rpc:  # VM is already in the desired state
         return False
     if not check:
-        # VM needs to be modified to achieve the desired state.
+        # Put VM in the desired state.
         if rpc not in record["allowed_operations"]:
             # This can occur while rapidly cycling power states, i.e. a clean
             # shutdown will be refused while the VM is still booting up. It
             # shouldn't be an issue during normal operations.
             raise RuntimeError("VM refuses {:s} at this time".format(rpc))
-        api = xen.Async.VM if async else xen.VM
-        getattr(api, rpc)(record["object_ref"])
+        task = getattr(xen.Async.VM, rpc)(record["object_ref"])
+        while not async and xen.task.get_status(task) == "pending":
+            # TODO: Probably need an `async_timeout` option here.
+            # Wait for task to complete before returning.
+            sleep(0.1)
+        xen.task.destroy(task)
     return True
 
 
 @_async_wait
-def _present(xen, record, check=False, async=False):
+def _present(xen, record, async=False, check=False):
     """ Ensure that the VM is present.
 
     Returns True if this requires modifying the VM state. In check mode the VM
@@ -268,7 +272,7 @@ def _present(xen, record, check=False, async=False):
 
 
 @_async_wait
-def _restarted(xen, record, check=False, async=False):
+def _restarted(xen, record, async=False, check=False):
     """ Ensure that the VM is started from a power off state.
 
     This always returns True because restarting always modifies the VM state.
@@ -277,6 +281,7 @@ def _restarted(xen, record, check=False, async=False):
     synchronous.
 
     """
+    # TODO: All state functions are almost identical; refactor.
     pause = force = False
     actions = {
         # FIXME: Use a delay or do a hard_reboot from suspended state?
@@ -293,18 +298,23 @@ def _restarted(xen, record, check=False, async=False):
     except KeyError:
         raise RuntimeError("VM is in unexpected state {:s}".format(state))
     if not check:
+        # Put VM in the desired state.
         if rpc not in record["allowed_operations"]:
             # This can occur while rapidly cycling power states, i.e. a
             # clean shutdown will be refused while the VM is still booting
             # up. It shouldn't be an issue during normal operations.
             raise RuntimeError("VM refuses {:s} at this time".format(rpc))
-        api = xen.Async.VM if async else xen.VM
-        getattr(api, rpc)(record["object_ref"], *args)
+        task = getattr(xen.Async.VM, rpc)(record["object_ref"], *args)
+        while not async and xen.task.get_status(task) == "pending":
+            # TODO: Probably need an `async_timeout` option here.
+            # Wait for task to complete before returning.
+            sleep(0.1)
+        xen.task.destroy(task)
     return True
 
 
 @_async_wait
-def _running(xen, record, check=False, async=False):
+def _running(xen, record, async=False, check=False):
     """ Ensure that the VM is running.
 
     Returns True if this requires modifying the VM state. In check mode the VM
@@ -312,10 +322,10 @@ def _running(xen, record, check=False, async=False):
     within a single action; multiple actions are always synchronous.
 
     """
-    # TODO: This is almost identical to _halted; refactor.
+    # TODO: All state functions are almost identical; refactor.
     pause = force = False
     actions = {
-        # RPC to achieve the desired state.
+        # RPC needed to achieve the desired state.
         "halted": "start",
         "running": None,
         "suspended": "resume",
@@ -328,14 +338,18 @@ def _running(xen, record, check=False, async=False):
     if not rpc:  # VM is already in the desired state
         return False
     if not check:
-        # VM needs to be modified to achieve the desired state.
+        # Put VM in the desired state.
         if rpc not in record["allowed_operations"]:
             # This can occur while rapidly cycling power states, i.e. a clean
             # shutdown will be refused while the VM is still booting up. It
             # shouldn't be an issue during normal operations.
             raise RuntimeError("VM refuses {:s} at this time".format(rpc))
-        api = xen.Async.VM if async else xen.VM
-        getattr(api, rpc)(record["object_ref"], pause, force)
+        task = getattr(xen.Async.VM, rpc)(record["object_ref"], pause, force)
+        while not async and xen.task.get_status(task) == "pending":
+            # TODO: Probably need an `async_timeout` option here.
+            # Wait for task to complete before returning.
+            sleep(0.1)
+        xen.task.destroy(task)
     return True
 
 
