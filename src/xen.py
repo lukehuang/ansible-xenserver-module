@@ -1,8 +1,8 @@
 """ The xen Ansible module for managing VMs.
 
-Check mode is supported. Rapid power cycling, e.g. attempting to shut down a VM
-while it is still booting up, may cause tasks to fail. See the DOCUMENTATION
-and EXAMPLES strings below for more information.
+Check mode is supported. Rapid power cycling may cause certain tasks to fail;
+the `wait_for` module may be necessary to ensure that a VM has finished booting
+up. See the DOCUMENTATION and EXAMPLES strings below for more information.
 
 """
 # Ansible modules do not use the normal Python import machinery, so all imports
@@ -131,6 +131,7 @@ def main():
     actions = {
         "halted": _halted,
         "present": _present,
+        "restarted": _restarted,
         "running": _running,
     }
     action = actions[module.params["state"]]
@@ -143,7 +144,7 @@ def main():
         for record in records:
             try:
                 changed = action(xen, record, check, async) or changed
-            except (AssertionError, RuntimeError) as err:
+            except RuntimeError as err:
                 module.fail_json(msg=err.message, instance=record)
     module.exit_json(changed=changed, instances=records)  # calls exit(0)
 
@@ -193,7 +194,7 @@ def _xeniter(xen, filters):
 
 
 def _async_wait(action):
-    """ Wait for pending VM operations to complete before executing.
+    """ Decorator for waiting for pending VM operations to complete.
 
     """
     # This allows a single asynchronous action (the typical use case) to return
@@ -228,12 +229,18 @@ def _halted(xen, record, check=False, async=False):
 
     """
     # TODO: This is almost identical to _running; refactor.
-    actions = {"running": "clean_shutdown", "suspended": "hard_shutdown"}
+    actions = {
+        # RPC to achieve the desired state.
+        "halted": None,
+        "running": "clean_shutdown",
+        "suspended": "hard_shutdown"
+    }
     state = record["power_state"].lower()
     try:
         rpc = actions[state]
     except KeyError:
-        assert state == "halted"
+        raise RuntimeError("VM is in unexpected state {:s}".format(state))
+    if not rpc:  # VM is already in the desired state
         return False
     if not check:
         # VM needs to be modified to achieve the desired state.
@@ -261,6 +268,42 @@ def _present(xen, record, check=False, async=False):
 
 
 @_async_wait
+def _restarted(xen, record, check=False, async=False):
+    """ Ensure that the VM is started from a power off state.
+
+    This always returns True because restarting always modifies the VM state.
+    In check mode the VM is not modified. The `async` option only applies to
+    operations performed within a single action; multiple actions are always
+    synchronous.
+
+    """
+    pause = force = False
+    actions = {
+        # FIXME: Use a delay or do a hard_reboot from suspended state?
+        # Resuming from a suspended state might not be equivalent to a restart,
+        # but attempting to reboot after resuming always fails because the VM
+        # is not yet ready for clean_reboot.
+        "halted": ("start", (pause, force)),
+        "running": ("clean_reboot", tuple()),
+        "suspended": ("resume", (pause, force)),
+    }
+    state = record["power_state"].lower()
+    try:
+        rpc, args = actions[state]
+    except KeyError:
+        raise RuntimeError("VM is in unexpected state {:s}".format(state))
+    if not check:
+        if rpc not in record["allowed_operations"]:
+            # This can occur while rapidly cycling power states, i.e. a
+            # clean shutdown will be refused while the VM is still booting
+            # up. It shouldn't be an issue during normal operations.
+            raise RuntimeError("VM refuses {:s} at this time".format(rpc))
+        api = xen.Async.VM if async else xen.VM
+        getattr(api, rpc)(record["object_ref"], *args)
+    return True
+
+
+@_async_wait
 def _running(xen, record, check=False, async=False):
     """ Ensure that the VM is running.
 
@@ -271,21 +314,27 @@ def _running(xen, record, check=False, async=False):
     """
     # TODO: This is almost identical to _halted; refactor.
     pause = force = False
-    actions = {"halted": "start", "suspended": "resume"}
+    actions = {
+        # RPC to achieve the desired state.
+        "halted": "start",
+        "running": None,
+        "suspended": "resume",
+    }
     state = record["power_state"].lower()
     try:
         rpc = actions[state]
     except KeyError:
-        assert state == "running"
+        raise RuntimeError("VM is in unexpected state {:s}".format(state))
+    if not rpc:  # VM is already in the desired state
         return False
     if not check:
         # VM needs to be modified to achieve the desired state.
-        api = xen.Async.VM if async else xen.VM
         if rpc not in record["allowed_operations"]:
             # This can occur while rapidly cycling power states, i.e. a clean
             # shutdown will be refused while the VM is still booting up. It
             # shouldn't be an issue during normal operations.
             raise RuntimeError("VM refuses {:s} at this time".format(rpc))
+        api = xen.Async.VM if async else xen.VM
         getattr(api, rpc)(record["object_ref"], pause, force)
     return True
 
